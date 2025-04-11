@@ -20,7 +20,7 @@
 				publicKey: {
 					challenge,
 					userVerification: "discouraged",
-					allowCredentials: data.credentials.map((credential) => {
+					allowCredentials: (await data.credentials).map((credential) => {
 						return {
 							id: credential.id,
 							type: "public-key"

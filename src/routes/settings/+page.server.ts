@@ -39,10 +39,10 @@ export async function load(event: RequestEvent) {
 	}
 	let recoveryCode: string | null = null;
 	if (event.locals.user.registered2FA) {
-		recoveryCode = getUserRecoverCode(event.locals.user.id);
+		recoveryCode = await getUserRecoverCode(event.locals.user.id);
 	}
-	const passkeyCredentials = getUserPasskeyCredentials(event.locals.user.id);
-	const securityKeyCredentials = getUserSecurityKeyCredentials(event.locals.user.id);
+	const passkeyCredentials = await getUserPasskeyCredentials(event.locals.user.id);
+	const securityKeyCredentials = await getUserSecurityKeyCredentials(event.locals.user.id);
 	return {
 		recoveryCode,
 		user: event.locals.user,
@@ -109,7 +109,7 @@ async function updatePasswordAction(event: RequestEvent) {
 			}
 		});
 	}
-	const passwordHash = getUserPasswordHash(event.locals.user.id);
+	const passwordHash = await getUserPasswordHash(event.locals.user.id);
 	const validPassword = await verifyPasswordHash(passwordHash, password);
 	if (!validPassword) {
 		return fail(400, {
@@ -126,7 +126,7 @@ async function updatePasswordAction(event: RequestEvent) {
 	const sessionFlags: SessionFlags = {
 		twoFactorVerified: event.locals.session.twoFactorVerified
 	};
-	const session = createSession(sessionToken, event.locals.user.id, sessionFlags);
+	const session = await createSession(sessionToken, event.locals.user.id, sessionFlags);
 	setSessionTokenCookie(event, sessionToken, session.expiresAt);
 	return {
 		password: {
@@ -196,8 +196,8 @@ async function updateEmailAction(event: RequestEvent) {
 			}
 		});
 	}
-	const verificationRequest = createEmailVerificationRequest(event.locals.user.id, email);
-	sendVerificationEmail(verificationRequest.email, verificationRequest.code);
+	const verificationRequest = await createEmailVerificationRequest(event.locals.user.id, email);
+	await sendVerificationEmail(verificationRequest.email, verificationRequest.code);
 	setEmailVerificationRequestCookie(event, verificationRequest);
 	return redirect(302, "/verify-email");
 }
@@ -215,7 +215,7 @@ async function disconnectTOTPAction(event: RequestEvent) {
 	if (!totpUpdateBucket.consume(event.locals.user.id, 1)) {
 		return fail(429);
 	}
-	deleteUserTOTPKey(event.locals.user.id);
+	await deleteUserTOTPKey(event.locals.user.id);
 	return {};
 }
 
@@ -240,7 +240,7 @@ async function deletePasskeyAction(event: RequestEvent) {
 	} catch {
 		return fail(400);
 	}
-	const deleted = deleteUserPasskeyCredential(event.locals.user.id, credentialId);
+	const deleted = await deleteUserPasskeyCredential(event.locals.user.id, credentialId);
 	if (!deleted) {
 		return fail(400);
 	}

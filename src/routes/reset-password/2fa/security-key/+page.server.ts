@@ -6,7 +6,7 @@ import { validatePasswordResetSessionRequest } from "$lib/server/password-reset"
 import type { RequestEvent } from "./$types";
 
 export async function load(event: RequestEvent) {
-	const { session, user } = validatePasswordResetSessionRequest(event);
+	const { session, user } = await validatePasswordResetSessionRequest(event);
 
 	if (session === null) {
 		return redirect(302, "/forgot-password");
@@ -23,7 +23,7 @@ export async function load(event: RequestEvent) {
 	if (!user.registeredSecurityKey) {
 		return redirect(302, getPasswordReset2FARedirect(user));
 	}
-	const credentials = getUserSecurityKeyCredentials(user.id);
+	const credentials = await getUserSecurityKeyCredentials(user.id);
 	return {
 		credentials,
 		user

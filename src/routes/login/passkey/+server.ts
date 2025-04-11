@@ -102,7 +102,7 @@ export async function POST(context: RequestEvent): Promise<Response> {
 		});
 	}
 
-	const credential = getPasskeyCredential(credentialId);
+	const credential = await getPasskeyCredential(credentialId);
 	if (credential === null) {
 		return new Response("Invalid credential", {
 			status: 400
@@ -134,7 +134,7 @@ export async function POST(context: RequestEvent): Promise<Response> {
 		twoFactorVerified: true
 	};
 	const sessionToken = generateSessionToken();
-	const session = createSession(sessionToken, credential.userId, sessionFlags);
+	const session = await createSession(sessionToken, credential.userId, sessionFlags);
 	setSessionTokenCookie(context, sessionToken, session.expiresAt);
 	return new Response(null, {
 		status: 204

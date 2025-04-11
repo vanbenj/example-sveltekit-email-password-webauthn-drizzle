@@ -2,49 +2,58 @@ import { db } from "./db";
 import { generateRandomRecoveryCode } from "./utils";
 import { ExpiringTokenBucket } from "./rate-limit";
 import { decryptToString, encryptString } from "./encryption";
+import { user, session, totpCredential, passkeyCredential, securityKeyCredential } from "./db/schema";
+import { eq } from "drizzle-orm";
+import { Buffer } from "node:buffer";
 
 import type { User } from "./user";
 
 export const recoveryCodeBucket = new ExpiringTokenBucket<number>(3, 60 * 60);
 
-export function resetUser2FAWithRecoveryCode(userId: number, recoveryCode: string): boolean {
-	// Note: In Postgres and MySQL, these queries should be done in a transaction using SELECT FOR UPDATE
-	const row = db.queryOne("SELECT recovery_code FROM user WHERE id = ?", [userId]);
-	if (row === null) {
-		return false;
-	}
-	const encryptedRecoveryCode = row.bytes(0);
-	const userRecoveryCode = decryptToString(encryptedRecoveryCode);
-	if (recoveryCode !== userRecoveryCode) {
-		return false;
-	}
+export async function resetUser2FAWithRecoveryCode(userId: number, recoveryCode: string): Promise<boolean> {
+	await db.transaction(async (tx) => {
+		const userRecord = await db.select({ recoveryCode: user.recoveryCode })
+			.from(user)
+			.where(eq(user.id, userId))
+			.limit(1)
+			.for('update');
 
-	const newRecoveryCode = generateRandomRecoveryCode();
-	const encryptedNewRecoveryCode = encryptString(newRecoveryCode);
-
-	try {
-		db.execute("BEGIN TRANSACTION", []);
-		// Compare old recovery code to ensure recovery code wasn't updated.
-		const result = db.execute("UPDATE user SET recovery_code = ? WHERE id = ? AND recovery_code = ?", [
-			encryptedNewRecoveryCode,
-			userId,
-			encryptedRecoveryCode
-		]);
-		if (result.changes < 1) {
-			db.execute("ROLLBACK", []);
+		if (userRecord.length === 0) {
 			return false;
 		}
-		db.execute("UPDATE session SET two_factor_verified = 0 WHERE user_id = ?", [userId]);
-		db.execute("DELETE FROM totp_credential WHERE user_id = ?", [userId]);
-		db.execute("DELETE FROM passkey_credential WHERE user_id = ?", [userId]);
-		db.execute("DELETE FROM security_key_credential WHERE user_id = ?", [userId]);
-		db.execute("COMMIT", []);
-	} catch (e) {
-		if (db.inTransaction()) {
-			db.execute("ROLLBACK", []);
+
+		const userRecoveryCode = decryptToString(userRecord[0].recoveryCode);
+		if (recoveryCode !== userRecoveryCode) {
+			return false;
 		}
-		throw e;
-	}
+
+		const newRecoveryCode = generateRandomRecoveryCode();
+		const encryptedNewRecoveryCode = encryptString(newRecoveryCode);
+
+		// Update user's recovery code
+		const result = await tx.update(user)
+			.set({ recoveryCode: Buffer.from(encryptedNewRecoveryCode) })
+			.where(eq(user.id, userId))
+			.returning();
+
+		if (result.length === 0) {
+			throw new Error("Failed to update recovery code");
+		}
+
+		// Reset 2FA verification status
+		await tx.update(session)
+			.set({ twoFactorVerified: false })
+			.where(eq(session.userId, userId));
+
+		// Delete all 2FA credentials
+		await tx.delete(totpCredential)
+			.where(eq(totpCredential.userId, userId));
+		await tx.delete(passkeyCredential)
+			.where(eq(passkeyCredential.userId, userId));
+		await tx.delete(securityKeyCredential)
+			.where(eq(securityKeyCredential.userId, userId));
+	});
+
 	return true;
 }
 

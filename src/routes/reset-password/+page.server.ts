@@ -18,7 +18,7 @@ import type { Actions, RequestEvent } from "./$types";
 import type { SessionFlags } from "$lib/server/session";
 
 export async function load(event: RequestEvent) {
-	const { session, user } = validatePasswordResetSessionRequest(event);
+	const { session, user } = await validatePasswordResetSessionRequest(event);
 	if (session === null) {
 		return redirect(302, "/forgot-password");
 	}
@@ -36,7 +36,7 @@ export const actions: Actions = {
 };
 
 async function action(event: RequestEvent) {
-	const { session: passwordResetSession, user } = validatePasswordResetSessionRequest(event);
+	const { session: passwordResetSession, user } = await validatePasswordResetSessionRequest(event);
 	if (passwordResetSession === null) {
 		return fail(401, {
 			message: "Not authenticated"
@@ -74,7 +74,7 @@ async function action(event: RequestEvent) {
 		twoFactorVerified: passwordResetSession.twoFactorVerified
 	};
 	const sessionToken = generateSessionToken();
-	const session = createSession(sessionToken, user.id, sessionFlags);
+	const session = await createSession(sessionToken, user.id, sessionFlags);
 	setSessionTokenCookie(event, sessionToken, session.expiresAt);
 	deletePasswordResetSessionTokenCookie(event);
 	return redirect(302, "/");

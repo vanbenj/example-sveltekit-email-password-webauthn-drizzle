@@ -19,7 +19,7 @@ import {
 } from "$lib/server/webauthn";
 import { setSessionAs2FAVerified } from "$lib/server/session";
 import { RSAPublicKey } from "@oslojs/crypto/rsa";
-import { SqliteError } from "better-sqlite3";
+import postgres from "postgres";
 
 import type { WebAuthnUserCredential } from "$lib/server/webauthn";
 import type {
@@ -210,7 +210,7 @@ async function action(event: RequestEvent) {
 	}
 
 	// We don't have to worry about race conditions since queries are synchronous
-	const credentials = getUserSecurityKeyCredentials(event.locals.user.id);
+	const credentials = await getUserSecurityKeyCredentials(event.locals.user.id);
 	if (credentials.length >= 5) {
 		return fail(400, {
 			message: "Too many credentials"
@@ -220,7 +220,7 @@ async function action(event: RequestEvent) {
 	try {
 		createSecurityKeyCredential(credential);
 	} catch (e) {
-		if (e instanceof SqliteError && e.code === "SQLITE_CONSTRAINT_PRIMARYKEY") {
+		if (e instanceof postgres.PostgresError && e.code === "23505") {
 			return fail(400, {
 				message: "Invalid data"
 			});

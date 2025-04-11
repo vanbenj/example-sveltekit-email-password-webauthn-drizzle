@@ -5,7 +5,7 @@ import { recoveryCodeBucket, resetUser2FAWithRecoveryCode } from "$lib/server/2f
 import type { Actions, RequestEvent } from "./$types";
 
 export async function load(event: RequestEvent) {
-	const { session, user } = validatePasswordResetSessionRequest(event);
+	const { session, user } = await validatePasswordResetSessionRequest(event);
 
 	if (session === null) {
 		return redirect(302, "/forgot-password");
@@ -27,7 +27,7 @@ export const actions: Actions = {
 };
 
 async function action(event: RequestEvent) {
-	const { session, user } = validatePasswordResetSessionRequest(event);
+	const { session, user } = await validatePasswordResetSessionRequest(event);
 	if (session === null) {
 		return fail(401, {
 			message: "Not authenticated"

@@ -7,7 +7,7 @@ import { getPasswordReset2FARedirect } from "$lib/server/2fa";
 import type { Actions, RequestEvent } from "./$types";
 
 export async function load(event: RequestEvent) {
-	const { session, user } = validatePasswordResetSessionRequest(event);
+	const { session, user } = await validatePasswordResetSessionRequest(event);
 
 	if (session === null) {
 		return redirect(302, "/forgot-password");
@@ -34,7 +34,7 @@ export const actions: Actions = {
 };
 
 async function action(event: RequestEvent) {
-	const { session, user } = validatePasswordResetSessionRequest(event);
+	const { session, user } = await validatePasswordResetSessionRequest(event);
 	if (session === null) {
 		return fail(401, {
 			message: "Not authenticated"
@@ -63,7 +63,7 @@ async function action(event: RequestEvent) {
 			message: "Please enter your code"
 		});
 	}
-	const totpKey = getUserTOTPKey(session.userId);
+	const totpKey = await getUserTOTPKey(session.userId);
 	if (totpKey === null) {
 		return fail(403, {
 			message: "Forbidden"
@@ -80,6 +80,6 @@ async function action(event: RequestEvent) {
 		});
 	}
 	totpBucket.reset(session.userId);
-	setPasswordResetSessionAs2FAVerified(session.id);
+	await setPasswordResetSessionAs2FAVerified(session.id);
 	return redirect(302, "/reset-password");
 }

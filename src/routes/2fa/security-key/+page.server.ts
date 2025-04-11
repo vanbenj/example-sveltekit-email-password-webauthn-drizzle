@@ -20,7 +20,7 @@ export async function load(event: RequestEvent) {
 	if (!event.locals.user.registeredSecurityKey) {
 		return redirect(302, get2FARedirect(event.locals.user));
 	}
-	const credentials = getUserSecurityKeyCredentials(event.locals.user.id);
+	const credentials = await getUserSecurityKeyCredentials(event.locals.user.id);
 	return {
 		credentials,
 		user: event.locals.user

@@ -43,7 +43,7 @@ async function action(event: RequestEvent) {
 			email
 		});
 	}
-	const user = getUserFromEmail(email);
+	const user = await getUserFromEmail(email);
 	if (user === null) {
 		return fail(400, {
 			message: "Account does not exist",
@@ -62,10 +62,10 @@ async function action(event: RequestEvent) {
 			email
 		});
 	}
-	invalidateUserPasswordResetSessions(user.id);
+	await invalidateUserPasswordResetSessions(user.id);
 	const sessionToken = generateSessionToken();
-	const session = createPasswordResetSession(sessionToken, user.id, user.email);
-	sendPasswordResetEmail(session.email, session.code);
+	const session = await createPasswordResetSession(sessionToken, user.id, user.email);
+	await sendPasswordResetEmail(session.email, session.code);
 	setPasswordResetSessionTokenCookie(event, sessionToken, session.expiresAt);
 	return redirect(302, "/reset-password/verify-email");
 }

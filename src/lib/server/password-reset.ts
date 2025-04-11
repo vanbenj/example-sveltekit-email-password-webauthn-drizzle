@@ -2,93 +2,130 @@ import { db } from "./db";
 import { encodeHexLowerCase } from "@oslojs/encoding";
 import { generateRandomOTP } from "./utils";
 import { sha256 } from "@oslojs/crypto/sha2";
+import { passwordResetSession, type PasswordResetSession, type UserFull } from "./db/schema";
+import { eq } from "drizzle-orm";
 
 import type { RequestEvent } from "@sveltejs/kit";
 import type { User } from "./user";
 
-export function createPasswordResetSession(token: string, userId: number, email: string): PasswordResetSession {
+export async function createPasswordResetSession(token: string, userId: number, email: string): Promise<PasswordResetSession> {
 	const sessionId = encodeHexLowerCase(sha256(new TextEncoder().encode(token)));
-	const session: PasswordResetSession = {
+	const expiresAt = new Date(Date.now() + 1000 * 60 * 10);
+	const code = generateRandomOTP();
+	
+	await db.insert(passwordResetSession).values({
 		id: sessionId,
 		userId,
 		email,
-		expiresAt: new Date(Date.now() + 1000 * 60 * 10),
-		code: generateRandomOTP(),
+		code,
+		expiresAt,
+		emailVerified: false,
+		twoFactorVerified: false
+	});
+	
+	return {
+		id: sessionId,
+		userId,
+		email,
+		expiresAt,
+		code,
 		emailVerified: false,
 		twoFactorVerified: false
 	};
-	db.execute("INSERT INTO password_reset_session (id, user_id, email, code, expires_at) VALUES (?, ?, ?, ?, ?)", [
-		session.id,
-		session.userId,
-		session.email,
-		session.code,
-		Math.floor(session.expiresAt.getTime() / 1000)
-	]);
-	return session;
 }
 
-export function validatePasswordResetSessionToken(token: string): PasswordResetSessionValidationResult {
+export async function validatePasswordResetSessionToken(token: string): Promise<PasswordResetSessionValidationResult> {
 	const sessionId = encodeHexLowerCase(sha256(new TextEncoder().encode(token)));
-	const row = db.queryOne(
-		`SELECT password_reset_session.id, password_reset_session.user_id, password_reset_session.email, password_reset_session.code, password_reset_session.expires_at, password_reset_session.email_verified, password_reset_session.two_factor_verified,
-user.id, user.email, user.username, user.email_verified, IIF(totp_credential.id IS NOT NULL, 1, 0), IIF(passkey_credential.id IS NOT NULL, 1, 0), IIF(security_key_credential.id IS NOT NULL, 1, 0) FROM password_reset_session
-INNER JOIN user ON password_reset_session.user_id = user.id
-LEFT JOIN totp_credential ON user.id = totp_credential.user_id
-LEFT JOIN passkey_credential ON user.id = passkey_credential.user_id
-LEFT JOIN security_key_credential ON user.id = security_key_credential.user_id
-WHERE password_reset_session.id = ?`,
-		[sessionId]
-	);
-	if (row === null) {
+	
+	const result = await db.query.passwordResetSession.findFirst({
+		where: eq(passwordResetSession.id, sessionId),
+		with: {
+			user: {
+				columns: {
+					id: true,
+					email: true,
+					username: true,
+					emailVerified: true
+				},
+				with: {
+					totpCredential: {
+						columns: {
+							id: true
+						}
+					},
+					passkeyCredential: {
+						columns: {
+							id: true
+						}
+					},
+					securityKeyCredential: {
+						columns: {
+							id: true
+						}
+					}
+				}
+			}
+		}
+	}) as (PasswordResetSession & { user: UserFull }) | null;
+	
+	if (!result) {
 		return { session: null, user: null };
 	}
+	
 	const session: PasswordResetSession = {
-		id: row.string(0),
-		userId: row.number(1),
-		email: row.string(2),
-		code: row.string(3),
-		expiresAt: new Date(row.number(4) * 1000),
-		emailVerified: Boolean(row.number(5)),
-		twoFactorVerified: Boolean(row.number(6))
+		id: result.id,
+		userId: result.userId,
+		email: result.email,
+		code: result.code,
+		expiresAt: result.expiresAt,
+		emailVerified: Boolean(result.emailVerified),
+		twoFactorVerified: Boolean(result.twoFactorVerified)
 	};
+	
+	const userData = result.user;
 	const user: User = {
-		id: row.number(7),
-		email: row.string(8),
-		username: row.string(9),
-		emailVerified: Boolean(row.number(10)),
-		registeredTOTP: Boolean(row.number(11)),
-		registeredPasskey: Boolean(row.number(12)),
-		registeredSecurityKey: Boolean(row.number(13)),
-		registered2FA: false
+		id: userData.id,
+		email: userData.email,
+		username: userData.username,
+		emailVerified: Boolean(userData.emailVerified),
+		registeredTOTP: userData.totpCredential !== null,
+		registeredPasskey: userData.passkeyCredential !== null,
+		registeredSecurityKey: userData.securityKeyCredential !== null,
+		registered2FA: userData.totpCredential !== null || userData.passkeyCredential !== null || userData.securityKeyCredential !== null
 	};
-	if (user.registeredPasskey || user.registeredSecurityKey || user.registeredTOTP) {
-		user.registered2FA = true;
-	}
+	
 	if (Date.now() >= session.expiresAt.getTime()) {
-		db.execute("DELETE FROM password_reset_session WHERE id = ?", [session.id]);
+		await db.delete(passwordResetSession)
+			.where(eq(passwordResetSession.id, session.id));
 		return { session: null, user: null };
 	}
+	
 	return { session, user };
 }
 
-export function setPasswordResetSessionAsEmailVerified(sessionId: string): void {
-	db.execute("UPDATE password_reset_session SET email_verified = 1 WHERE id = ?", [sessionId]);
+export async function setPasswordResetSessionAsEmailVerified(sessionId: string): Promise<void> {
+	await db.update(passwordResetSession)
+		.set({ emailVerified: true })
+		.where(eq(passwordResetSession.id, sessionId));
 }
 
-export function setPasswordResetSessionAs2FAVerified(sessionId: string): void {
-	db.execute("UPDATE password_reset_session SET two_factor_verified = 1 WHERE id = ?", [sessionId]);
+export async function setPasswordResetSessionAs2FAVerified(sessionId: string): Promise<void> {
+	await db.update(passwordResetSession)
+		.set({ twoFactorVerified: true })
+		.where(eq(passwordResetSession.id, sessionId));
 }
 
-export function invalidateUserPasswordResetSessions(userId: number): void {
-	db.execute("DELETE FROM password_reset_session WHERE user_id = ?", [userId]);
+export async function invalidateUserPasswordResetSessions(userId: number): Promise<void> {
+	await db.delete(passwordResetSession)
+		.where(eq(passwordResetSession.userId, userId));
 }
 
-export function validatePasswordResetSessionRequest(event: RequestEvent): PasswordResetSessionValidationResult {
+export async function validatePasswordResetSessionRequest(event: RequestEvent): Promise<PasswordResetSessionValidationResult> {
 	const token = event.cookies.get("password_reset_session") ?? null;
 	if (token === null) {
 		return { session: null, user: null };
 	}
-	const result = validatePasswordResetSessionToken(token);
+	const result = await validatePasswordResetSessionToken(token);
 	if (result.session === null) {
 		deletePasswordResetSessionTokenCookie(event);
 	}
@@ -115,18 +152,8 @@ export function deletePasswordResetSessionTokenCookie(event: RequestEvent): void
 	});
 }
 
-export function sendPasswordResetEmail(email: string, code: string): void {
+export async function sendPasswordResetEmail(email: string, code: string): Promise<void> {
 	console.log(`To ${email}: Your reset code is ${code}`);
-}
-
-export interface PasswordResetSession {
-	id: string;
-	userId: number;
-	email: string;
-	expiresAt: Date;
-	code: string;
-	emailVerified: boolean;
-	twoFactorVerified: boolean;
 }
 
 export type PasswordResetSessionValidationResult =

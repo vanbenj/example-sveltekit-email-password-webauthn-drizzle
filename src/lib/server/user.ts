@@ -2,6 +2,8 @@ import { db } from "./db";
 import { decryptToString, encryptString } from "./encryption";
 import { hashPassword } from "./password";
 import { generateRandomRecoveryCode } from "./utils";
+import { user, totpCredential, passkeyCredential, securityKeyCredential } from "./db/schema";
+import { eq, and } from "drizzle-orm";
 
 export function verifyUsernameInput(username: string): boolean {
 	return username.length > 3 && username.length < 32 && username.trim() === username;
@@ -11,15 +13,23 @@ export async function createUser(email: string, username: string, password: stri
 	const passwordHash = await hashPassword(password);
 	const recoveryCode = generateRandomRecoveryCode();
 	const encryptedRecoveryCode = encryptString(recoveryCode);
-	const row = db.queryOne(
-		"INSERT INTO user (email, username, password_hash, recovery_code) VALUES (?, ?, ?, ?) RETURNING user.id",
-		[email, username, passwordHash, encryptedRecoveryCode]
-	);
-	if (row === null) {
+	
+	const result = await db.insert(user)
+		.values({
+			email,
+			username,
+			passwordHash,
+			recoveryCode: Buffer.from(encryptedRecoveryCode),
+			emailVerified: false
+		})
+		.returning({ id: user.id });
+	
+	if (!result.length) {
 		throw new Error("Unexpected error");
 	}
-	const user: User = {
-		id: row.number(0),
+	
+	const newUser: User = {
+		id: result[0].id,
 		username,
 		email,
 		emailVerified: false,
@@ -28,72 +38,104 @@ export async function createUser(email: string, username: string, password: stri
 		registeredSecurityKey: false,
 		registered2FA: false
 	};
-	return user;
+	
+	return newUser;
 }
 
 export async function updateUserPassword(userId: number, password: string): Promise<void> {
 	const passwordHash = await hashPassword(password);
-	db.execute("UPDATE user SET password_hash = ? WHERE id = ?", [passwordHash, userId]);
+	
+	await db.update(user)
+		.set({ passwordHash })
+		.where(eq(user.id, userId));
 }
 
-export function updateUserEmailAndSetEmailAsVerified(userId: number, email: string): void {
-	db.execute("UPDATE user SET email = ?, email_verified = 1 WHERE id = ?", [email, userId]);
+export async function updateUserEmailAndSetEmailAsVerified(userId: number, email: string): Promise<void> {
+	await db.update(user)
+		.set({ email, emailVerified: true })
+		.where(eq(user.id, userId));
 }
 
-export function setUserAsEmailVerifiedIfEmailMatches(userId: number, email: string): boolean {
-	const result = db.execute("UPDATE user SET email_verified = 1 WHERE id = ? AND email = ?", [userId, email]);
-	return result.changes > 0;
+export async function setUserAsEmailVerifiedIfEmailMatches(userId: number, email: string): Promise<boolean> {
+	const result = await db.update(user)
+		.set({ emailVerified: true })
+		.where(and(eq(user.id, userId), eq(user.email, email)))
+		.returning({ id: user.id });
+	
+	return result.length > 0;
 }
 
-export function getUserPasswordHash(userId: number): string {
-	const row = db.queryOne("SELECT password_hash FROM user WHERE id = ?", [userId]);
-	if (row === null) {
+export async function getUserPasswordHash(userId: number): Promise<string> {
+	const result = await db.query.user.findFirst({
+		where: eq(user.id, userId),
+		columns: {
+			passwordHash: true
+		}
+	});
+	
+	if (!result) {
 		throw new Error("Invalid user ID");
 	}
-	return row.string(0);
+	
+	return result.passwordHash;
 }
 
-export function getUserRecoverCode(userId: number): string {
-	const row = db.queryOne("SELECT recovery_code FROM user WHERE id = ?", [userId]);
-	if (row === null) {
+export async function getUserRecoverCode(userId: number): Promise<string> {
+	const result = await db.query.user.findFirst({
+		where: eq(user.id, userId),
+		columns: {
+			recoveryCode: true
+		}
+	});
+	
+	if (!result) {
 		throw new Error("Invalid user ID");
 	}
-	return decryptToString(row.bytes(0));
+	
+	return decryptToString(result.recoveryCode);
 }
 
-export function resetUserRecoveryCode(userId: number): string {
+export async function resetUserRecoveryCode(userId: number): Promise<string> {
 	const recoveryCode = generateRandomRecoveryCode();
 	const encrypted = encryptString(recoveryCode);
-	db.execute("UPDATE user SET recovery_code = ? WHERE id = ?", [encrypted, userId]);
+	
+	await db.update(user)
+		.set({ recoveryCode: Buffer.from(encrypted) })
+		.where(eq(user.id, userId));
+	
 	return recoveryCode;
 }
 
-export function getUserFromEmail(email: string): User | null {
-	const row = db.queryOne(
-		`SELECT user.id, user.email, user.username, user.email_verified, IIF(totp_credential.id IS NOT NULL, 1, 0), IIF(passkey_credential.id IS NOT NULL, 1, 0), IIF(security_key_credential.id IS NOT NULL, 1, 0) FROM user
-        LEFT JOIN totp_credential ON user.id = totp_credential.user_id
-        LEFT JOIN passkey_credential ON user.id = passkey_credential.user_id
-        LEFT JOIN security_key_credential ON user.id = security_key_credential.user_id
-        WHERE user.email = ?`,
-		[email]
-	);
-	if (row === null) {
+export async function getUserFromEmail(email: string): Promise<User | null> {
+	const result = await db.query.user.findFirst({
+		where: eq(user.email, email),
+		with: {
+			totpCredential: true,
+			passkeyCredential: true,
+			securityKeyCredential: true
+		}
+	});
+	
+	if (!result) {
 		return null;
 	}
-	const user: User = {
-		id: row.number(0),
-		email: row.string(1),
-		username: row.string(2),
-		emailVerified: Boolean(row.number(3)),
-		registeredTOTP: Boolean(row.number(4)),
-		registeredPasskey: Boolean(row.number(5)),
-		registeredSecurityKey: Boolean(row.number(6)),
+	
+	const userObj: User = {
+		id: result.id,
+		email: result.email,
+		username: result.username,
+		emailVerified: Boolean(result.emailVerified),
+		registeredTOTP: result.totpCredential !== null,
+		registeredPasskey: result.passkeyCredential !== null,
+		registeredSecurityKey: result.securityKeyCredential !== null,
 		registered2FA: false
 	};
-	if (user.registeredPasskey || user.registeredSecurityKey || user.registeredTOTP) {
-		user.registered2FA = true;
+	
+	if (userObj.registeredPasskey || userObj.registeredSecurityKey || userObj.registeredTOTP) {
+		userObj.registered2FA = true;
 	}
-	return user;
+	
+	return userObj;
 }
 
 export interface User {

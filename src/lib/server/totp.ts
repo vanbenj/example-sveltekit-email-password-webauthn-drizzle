@@ -1,37 +1,41 @@
 import { db } from "./db";
 import { decrypt, encrypt } from "./encryption";
 import { ExpiringTokenBucket, RefillingTokenBucket } from "./rate-limit";
+import { eq } from "drizzle-orm";
+import { totpCredential } from "./db/schema";
+import { Buffer } from "node:buffer";
 
 export const totpBucket = new ExpiringTokenBucket<number>(5, 60 * 30);
 export const totpUpdateBucket = new RefillingTokenBucket<number>(3, 60 * 10);
 
-export function getUserTOTPKey(userId: number): Uint8Array | null {
-	const row = db.queryOne("SELECT totp_credential.key FROM totp_credential WHERE user_id = ?", [userId]);
-	if (row === null) {
+export async function getUserTOTPKey(userId: number): Promise<Uint8Array | null> {
+	const result = await db.query.totpCredential.findFirst({
+		where: eq(totpCredential.userId, userId),
+		columns: {
+			key: true
+		}
+	});
+
+	if (!result) {
 		throw new Error("Invalid user ID");
 	}
-	const encrypted = row.bytesNullable(0);
-	if (encrypted === null) {
-		return null;
-	}
-	return decrypt(encrypted);
+
+	return result.key ? decrypt(result.key) : null;
 }
 
-export function updateUserTOTPKey(userId: number, key: Uint8Array): void {
+export async function updateUserTOTPKey(userId: number, key: Uint8Array): Promise<void> {
 	const encrypted = encrypt(key);
-	try {
-		db.execute("BEGIN TRANSACTION", []);
-		db.execute("DELETE FROM totp_credential WHERE user_id = ?", [userId]);
-		db.execute("INSERT INTO totp_credential (user_id, key) VALUES (?, ?)", [userId, encrypted]);
-		db.execute("COMMIT", []);
-	} catch (e) {
-		if (db.inTransaction()) {
-			db.execute("ROLLBACK", []);
-		}
-		throw e;
-	}
+	const buffer = Buffer.from(encrypted);
+	
+	await db.transaction(async (tx) => {
+		await tx.delete(totpCredential).where(eq(totpCredential.userId, userId));
+		await tx.insert(totpCredential).values({
+			userId,
+			key: buffer
+		});
+	});
 }
 
-export function deleteUserTOTPKey(userId: number): void {
-	db.execute("DELETE FROM totp_credential WHERE user_id = ?", [userId]);
+export async function deleteUserTOTPKey(userId: number): Promise<void> {
+	await db.delete(totpCredential).where(eq(totpCredential.userId, userId));
 }

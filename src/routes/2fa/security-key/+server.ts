@@ -115,7 +115,7 @@ export async function POST(event: RequestEvent) {
 		});
 	}
 
-	const credential = getUserSecurityKeyCredential(event.locals.user.id, credentialId);
+	const credential = await getUserSecurityKeyCredential(event.locals.user.id, credentialId);
 	if (credential === null) {
 		return new Response("Invalid credential", {
 			status: 400

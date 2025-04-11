@@ -45,7 +45,7 @@
 					residentKey: "required",
 					requireResidentKey: true
 				},
-				excludeCredentials: data.credentials.map((credential) => {
+				excludeCredentials: (await data.credentials).map((credential) => {
 					return {
 						id: credential.id,
 						type: "public-key"

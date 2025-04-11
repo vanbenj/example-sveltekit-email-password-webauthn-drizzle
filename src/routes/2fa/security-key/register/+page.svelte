@@ -46,7 +46,7 @@
 					requireResidentKey: false,
 					authenticatorAttachment: "cross-platform"
 				},
-				excludeCredentials: data.credentials.map((credential) => {
+				excludeCredentials: (await data.credentials).map((credential) => {
 					return {
 						id: credential.id,
 						type: "public-key"

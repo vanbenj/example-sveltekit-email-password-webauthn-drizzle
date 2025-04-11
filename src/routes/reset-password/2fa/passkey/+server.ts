@@ -18,7 +18,7 @@ import type { AuthenticatorData, ClientData } from "@oslojs/webauthn";
 import type { RequestEvent } from "./$types";
 
 export async function POST(event: RequestEvent) {
-	const { session, user } = validatePasswordResetSessionRequest(event);
+	const { session, user } = await validatePasswordResetSessionRequest(event);
 	if (session === null || user === null) {
 		return new Response("Not authenticated", {
 			status: 401
@@ -112,7 +112,7 @@ export async function POST(event: RequestEvent) {
 		});
 	}
 
-	const credential = getUserPasskeyCredential(user.id, credentialId);
+	const credential = await getUserPasskeyCredential(user.id, credentialId);
 	if (credential === null) {
 		return new Response("Invalid credential", {
 			status: 400

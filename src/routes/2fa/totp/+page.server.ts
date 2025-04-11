@@ -61,7 +61,7 @@ async function action(event: RequestEvent) {
 			message: "Too many requests"
 		});
 	}
-	const totpKey = getUserTOTPKey(event.locals.user.id);
+	const totpKey = await getUserTOTPKey(event.locals.user.id);
 	if (totpKey === null) {
 		return fail(403, {
 			message: "Forbidden"

@@ -63,7 +63,7 @@ async function action(event: RequestEvent) {
 			email
 		});
 	}
-	const user = getUserFromEmail(email);
+	const user = await getUserFromEmail(email);
 	if (user === null) {
 		return fail(400, {
 			message: "Account does not exist",
@@ -82,7 +82,7 @@ async function action(event: RequestEvent) {
 			email: ""
 		});
 	}
-	const passwordHash = getUserPasswordHash(user.id);
+	const passwordHash = await getUserPasswordHash(user.id);
 	const validPassword = await verifyPasswordHash(passwordHash, password);
 	if (!validPassword) {
 		return fail(400, {
@@ -95,7 +95,7 @@ async function action(event: RequestEvent) {
 		twoFactorVerified: false
 	};
 	const sessionToken = generateSessionToken();
-	const session = createSession(sessionToken, user.id, sessionFlags);
+	const session = await createSession(sessionToken, user.id, sessionFlags);
 	setSessionTokenCookie(event, sessionToken, session.expiresAt);
 
 	if (!user.emailVerified) {
