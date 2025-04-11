@@ -38,7 +38,7 @@ export async function load(event: RequestEvent) {
 		return redirect(302, get2FARedirect(event.locals.user));
 	}
 
-	const credentials = getUserPasskeyCredentials(event.locals.user.id);
+	const credentials = await getUserPasskeyCredentials(event.locals.user.id);
 
 	const credentialUserId = new Uint8Array(8);
 	bigEndian.putUint64(credentialUserId, BigInt(event.locals.user.id), 0);
