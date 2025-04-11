@@ -1,6 +1,10 @@
 # Email and password example with 2FA and WebAuthn in SvelteKit
 
-Built with SQLite.
+This is a fork of https://github.com/lucia-auth/example-sveltekit-email-password-webauthn
+
+The only changes are to replace the SQLite implementation with a Postgres implemmentation using Drizzle orm.
+
+Built with Postgres and Drizzle
 
 - Password checks with HaveIBeenPwned
 - Sign in with passkeys
@@ -15,10 +19,20 @@ Emails are just logged to the console. Rate limiting is implemented using JavaSc
 
 ## Initialize project
 
-Create `sqlite.db` and run `setup.sql`.
+Run Postgres db using docker-compose
+```
+docker-compose up
+```
+
+Install dependencies:
 
 ```
-sqlite3 sqlite.db
+pnpm i
+```
+
+Run the Drizzle migrations to create the database schema
+```
+npx drizzle-kit migrate
 ```
 
 Create a .env file. Generate a 128 bit (16 byte) string, base64 encode it, and set it as `ENCRYPTION_KEY`.
@@ -33,10 +47,9 @@ ENCRYPTION_KEY="L9pmqRJnO1ZJSQ2svbHuBA=="
 > openssl rand --base64 16
 > ```
 
-Install dependencies and run the application:
+Run the application:
 
 ```
-pnpm i
 pnpm dev
 ```
 
